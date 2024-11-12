@@ -3,7 +3,7 @@ import secrets
 import time
 
 from change.normal_query import get_setting, get_access_token, start_rechage_send_tempalte, invalid_dealer_order, \
-    five_order_refund, over_recharge, shua_card_rechage
+    five_order_refund, over_recharge, shua_card_rechage,xwcalc_consum
 from config import db_config
 from tool.calc import low_high, dec2hex, getimestamp
 from tool.logger import MyLogger
@@ -330,7 +330,8 @@ def xinwang_protocol(data, conn, addr):
                     # 计算充电时间判断是否大于5分钟
                     rechargetime = (timer.time2timestamp(order['end_time']) - timer.time2timestamp(order['start_time'].strftime("%Y-%m-%d %H:%M:%S"))) / 60  # 分钟
                     #结束充电
-                    over_recharge(order,rechargetime,end_time,portendstatue,powerwaste,portelectric)
+                    consum_elec = xwcalc_consum(order)
+                    over_recharge(order,rechargetime,end_time,portendstatue,powerwaste,portelectric,consum_elec)
             # 回复指令
             repheard = 'dddd'
             repcheck = '0'.zfill(4)

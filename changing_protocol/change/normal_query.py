@@ -91,7 +91,46 @@ def worry_free_price(mini_id):
         return 0
 
 
-def over_recharge(order,rechargetime,end_time,plugstatus,power,electric):
+def xwcalc_consum(order):
+    """新网计算电量"""
+    sob_handle = sob.sql_open(db_config)
+    if order['order_status'] == 20:
+        end_time = order['end_time'].strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        end_time = timer.get_now()
+    end_times = end_time[:10]
+    start_time = order['start_time'].strftime("%Y-%m-%d %H:%M:%S")
+    start_times = start_time[:10]
+    if start_times == end_times:
+        table_name = f'wxapp_pod_port_electric_{start_times}'
+        table_name = table_name.replace('-', '_')
+        cmd = f"select portelectric,add_time from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}' order by id"
+        pod_port_electric = sob.select_mysql_record(sob_handle, cmd)
+    else:
+        table_name = f'wxapp_pod_port_electric_{start_times}'
+        table_name = table_name.replace('-', '_')
+        cmd = f"select portelectric,add_time from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}' order by id"
+        pod_port_electric_start = sob.select_mysql_record(sob_handle, cmd)
+        table_name = f'wxapp_pod_port_electric_{end_times}'
+        table_name = table_name.replace('-', '_')
+        cmd = f"select portelectric,add_time from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}' order by id"
+        pod_port_electric_end = sob.select_mysql_record(sob_handle, cmd)
+        pod_port_electric = pod_port_electric_start + pod_port_electric_end
+
+    st_time = order['start_time']
+    consum_elec = 0
+    for _ in pod_port_electric:
+        calc_time = _['add_time'] - st_time
+        minu = calc_time.total_seconds() / 60
+        consum_elec += _['portelectric'] / 1000 * 220 / 1000 / 60 * minu
+        st_time = _['add_time']
+    sob.sql_close(sob_handle)
+    return consum_elec
+
+
+
+
+def over_recharge(order,rechargetime,end_time,plugstatus,power,electric,consum_elec):
     try:
         print('结束充电。。。。。')
         sob_handle = sob.sql_open(db_config)
@@ -114,14 +153,13 @@ def over_recharge(order,rechargetime,end_time,plugstatus,power,electric):
                     values_json = get_setting(order['mini_id'], 'settlement')
                     first_proportion = int(values_json.get('first_proportion',0))  # 一级分成比例
                     second_proportion = int(values_json.get('second_proportion',0))  # 二级分成比例
-                # try:
+
                 if note['bill_type'] == 0: #按时
                     calc_order_refund(order, note, rechargetime, first_proportion, second_proportion)
                 else:
-                    print('分档充电。。。。。')
-                    calc_order_tranche_fefund(order, note, rechargetime, first_proportion, second_proportion)
-                # except:
-                #     prolog.error(f"充电时长不足退款异常:订单{order['id']}")
+                    print('按电量充电。。。。。')
+                    calc_order_tranche_fefund(order, note, rechargetime, first_proportion, second_proportion,consum_elec)
+
                 if order['billtype'] == 2:# 充满自停
                     cmd = f"select * from wxapp_bill where note_id={note['id']} and billtype=2"
                     bills = sob.select_mysql_record(sob_handle,cmd)
@@ -150,6 +188,8 @@ def over_recharge(order,rechargetime,end_time,plugstatus,power,electric):
                         second_proportion_money = 0
                         total_price = 0
                         pay_price = 0
+                        server_price = 0
+                        electrct_price = 0
                         for recharge in recharge_package_orders:
                             if recharge['end_time'] > datetime.datetime.strptime(order['end_time'], '%Y-%m-%d %H:%M:%S'):# 套餐包结束时间大于充电订单结束时间
                                 if recharge['residue_time'] >= recharge_time:
@@ -177,11 +217,15 @@ def over_recharge(order,rechargetime,end_time,plugstatus,power,electric):
                                     recharge_time = step
                                 else:  # 大于步长
                                     recharge_time = math.ceil(recharge_time / step) * step
-                                total_price = bill['price'] * recharge_time + price_one
-                                pay_price = bill['price'] * recharge_time + price_one
+                                server_price = note['server_fee'] * recharge_time
+                                electrct_price = bill['price'] * recharge_time
+                                total_price = electrct_price + price_one + server_price
+                                pay_price = electrct_price + price_one + server_price
                             else:
-                                total_price = bill['price'] * recharge_time*60 + price_one
-                                pay_price = bill['price'] * recharge_time*60 + price_one
+                                server_price = note['server_fee'] * recharge_time
+                                electrct_price = bill['price'] * recharge_time * 60
+                                total_price = electrct_price + price_one + server_price
+                                pay_price = electrct_price + price_one + server_price
                             first_proportion_money = total_price * (first_proportion / 100)  # 一级（代理商）分成
                             second_proportion_money = total_price * (second_proportion / 100)  # 二级（物业）分成
                             if user['virtual_balance'] >= pay_price:
@@ -224,10 +268,10 @@ def over_recharge(order,rechargetime,end_time,plugstatus,power,electric):
                             else:
                                 # 订单支付提醒
                                 order_pay_send_temp(order['mini_id'], note['note_name'], rechargetime, pay_price, user['open_id'], order['id'])
-                        cmd = f"update wxapp_order set recharge_time={recharge_time_total},total_price={total_price},pay_price={pay_price},first_proportion_money={first_proportion_money},second_proportion_money={second_proportion_money} where id={order['id']}"
+                        cmd = f"update wxapp_order set recharge_time={recharge_time_total},total_price={total_price},pay_price={pay_price},server_price={server_price},electrct_price={electrct_price},first_proportion_money={first_proportion_money},second_proportion_money={second_proportion_money} where id={order['id']}"
                         sob.update_mysql_record(sob_handle,cmd)
-                elif order['billtype'] == 4:#分档充满自停
-                    tranche_pay(order, note, rechargetime, user, price_one, first_proportion,second_proportion)
+                elif order['billtype'] == 4:#电量充满自停
+                    tranche_pay(order, note, rechargetime, user, price_one, first_proportion,second_proportion,consum_elec)
 
                 cmd = f"select * from wxapp_order where id={order['id']}"
                 order = sob.select_mysql_record(sob_handle, cmd)
@@ -465,14 +509,16 @@ def calc_order_refund(order,note,rechargetime,first_proportion,second_proportion
             residue_rechage = order['recharge_time'] * 60 - rechargetime  # 剩余分钟数
             calc_step = math.floor(residue_rechage / note['step'])
             refund_price = calc_step * note['refund_price']  # 退款金额
+            refund_electrct_price = refund_price * order['electrct_price'] / (order['electrct_price'] + order['server_price'])
+            refund_server_price = refund_price - refund_electrct_price
             if refund_price > 0:
                 if order['pay_type'] == 10:  # 余额支付
-                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price} where id={order['id']}"
+                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price},electrct_price=electrct_price-{refund_electrct_price},server_price=server_price-{refund_server_price} where id={order['id']}"
                     sob.update_mysql_record(sob_handle, cmd)
                     cmd = f"update wxapp_user set balance=balance+{refund_price} where id={order['user_id']}"
                     sob.update_mysql_record(sob_handle, cmd)
                 elif order['pay_type'] == 60: # 虚拟余额支付
-                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price} where id={order['id']}"
+                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price},electrct_price=electrct_price-{refund_electrct_price},server_price=server_price-{refund_server_price} where id={order['id']}"
                     sob.update_mysql_record(sob_handle, cmd)
                     cmd = f"update wxapp_user set virtual_balance=virtual_balance+{refund_price} where id={order['user_id']}"
                     sob.update_mysql_record(sob_handle, cmd)
@@ -497,7 +543,7 @@ def calc_order_refund(order,note,rechargetime,first_proportion,second_proportion
                             print(resp.text)
 
 
-                        cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price} where id={order['id']}"
+                        cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price},electrct_price=electrct_price-{refund_electrct_price},server_price=server_price-{refund_server_price} where id={order['id']}"
                         sob.update_mysql_record(sob_handle, cmd)
 
                 first_proportion_money = order['pay_price'] * (first_proportion / 100)  # 一级（代理商）分成
@@ -507,65 +553,32 @@ def calc_order_refund(order,note,rechargetime,first_proportion,second_proportion
     sob.sql_close(sob_handle)
 
 
-def calc_order_tranche_fefund(order,note,rechargetime,first_proportion,second_proportion):
-    '''分档充电退款'''
-    print('分档充电退款')
+def calc_order_tranche_fefund(order,note,rechargetime,first_proportion,second_proportion,consum_elec):
+    '''按电量充电退款'''
+    print('按电量充电退款')
     sob_handle = sob.sql_open(db_config)
     if order['pay_status'] == 20:  # 已支付
         if order['pay_type'] == 10 or order['pay_type'] == 20 or order['pay_type'] == 60:
-            if note['step'] == 1: #1分钟
-                rechargetime = rechargetime / 60  # 真实充电时长（小时）
-            else:
-                rechargetime = math.ceil(rechargetime / 60)  # 向上取整充电时长（小时）
-            rechargetime = rechargetime if rechargetime < order['recharge_time'] else order['recharge_time']
-            if order['order_status'] == 20:
-                end_time = order['end_time'].strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                end_time = timer.get_now()
-            end_times = end_time[:10]
-            start_time = order['start_time'].strftime("%Y-%m-%d %H:%M:%S")
-            start_times = start_time[:10]
-            # try:
-            if start_times == end_times:
-                table_name = f'wxapp_pod_port_electric_{start_times}'
-                table_name = table_name.replace('-', '_')
-                cmd = f"select portelectric from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}'"
-                pod_port_electric = sob.select_mysql_record(sob_handle,cmd)
-            else:
-                table_name = f'wxapp_pod_port_electric_{start_times}'
-                table_name = table_name.replace('-', '_')
-                cmd = f"select portelectric from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}'"
-                pod_port_electric_start = sob.select_mysql_record(sob_handle, cmd)
-                table_name = f'wxapp_pod_port_electric_{end_times}'
-                table_name = table_name.replace('-', '_')
-                cmd = f"select portelectric from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}'"
-                pod_port_electric_end = sob.select_mysql_record(sob_handle, cmd)
-                pod_port_electric = pod_port_electric_start + pod_port_electric_end
-            pod_port_electric = sorted(pod_port_electric,key=lambda pod_port_electric: pod_port_electric["portelectric"],
-                                          reverse=True)  # 排序
-            portelectric = pod_port_electric[0]['portelectric'] if pod_port_electric else 0#前x分钟最高电流
-            cmd = f"select * from wxapp_bill_tranche where note_id={note['id']} and start_section<={portelectric} and end_section>={portelectric}"
-            bill_tranche = sob.select_mysql_record(sob_handle,cmd)
-            if bill_tranche:
-                bill_tranche = bill_tranche[0]
-            else:
-                cmd = f"select * from wxapp_bill_tranche where note_id={note['id']} order by sort"
-                bill_tranche = sob.select_mysql_record(sob_handle, cmd)
-                bill_tranche = bill_tranche[0]
+            cmd = f"select * from wxapp_bill where note_id={note['id']} and billtype=3"
+            bills = sob.select_mysql_record(sob_handle, cmd)
+            #服务费
+            server_price = math.ceil(consum_elec) * note['server_fee']
+            #基础电费
+            electrct_price = math.ceil(consum_elec) * bills[0]['price']
             price_one = worry_free_price(note['mini_id'])
             if order['pay_price'] == note['predict_price'] + price_one:
-                refund_price = order['pay_price'] - bill_tranche['price'] * rechargetime - price_one  # 退款金额
+                refund_price = order['pay_price'] - server_price - electrct_price - price_one # 退款金额
             else:
-                refund_price = order['pay_price'] - bill_tranche['price'] * rechargetime  # 退款金额
+                refund_price = order['pay_price'] - server_price - electrct_price # 退款金额
             print('refund_price',refund_price)
             if refund_price > 0:
                 if order['pay_type'] == 10:  # 余额支付
-                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price} where id={order['id']}"
+                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price},electrct_price={electrct_price},server_price={server_price} where id={order['id']}"
                     sob.update_mysql_record(sob_handle, cmd)
                     cmd = f"update wxapp_user set balance=balance+{refund_price} where id={order['user_id']}"
                     sob.update_mysql_record(sob_handle, cmd)
                 elif order['pay_type'] == 60:  # 虚拟余额支付
-                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price} where id={order['id']}"
+                    cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price},electrct_price={electrct_price},server_price={server_price} where id={order['id']}"
                     sob.update_mysql_record(sob_handle, cmd)
                     cmd = f"update wxapp_user set virtual_balance=virtual_balance+{refund_price} where id={order['user_id']}"
                     sob.update_mysql_record(sob_handle, cmd)
@@ -588,7 +601,7 @@ def calc_order_tranche_fefund(order,note,rechargetime,first_proportion,second_pr
                             wx_pay_sdk().refunds_v3(order['transaction_id'], out_refund_no,
                                                     refund_fee, total_fee, payinfo['mchid'], payinfo['apikey'],payinfo['key_pem'])
 
-                        cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price} where id={order['id']}"
+                        cmd = f"update wxapp_order set residue_money={refund_price},refund_time='{timer.get_now()}',pay_price=pay_price-{refund_price},electrct_price={electrct_price},server_price={server_price} where id={order['id']}"
                         sob.update_mysql_record(sob_handle, cmd)
 
                 first_proportion_money = order['pay_price'] * (first_proportion / 100)  # 一级（代理商）分成
@@ -602,7 +615,8 @@ def calc_order_tranche_fefund(order,note,rechargetime,first_proportion,second_pr
 
 
 
-def tranche_pay(order,note,rechargetime,user,price_one,first_proportion,second_proportion):
+def tranche_pay(order,note,rechargetime,user,price_one,first_proportion,second_proportion,consum_elec):
+    """电量充满自停"""
     sob_handle = sob.sql_open(db_config)
     if note['step'] == 1:  # 1分钟
         recharge_time = rechargetime / 60  # 真实充电时长（小时）
@@ -620,6 +634,8 @@ def tranche_pay(order,note,rechargetime,user,price_one,first_proportion,second_p
     second_proportion_money = 0
     total_price = 0
     pay_price = 0
+    electrct_price = 0
+    server_price = 0
     for recharge in recharge_package_orders:
         if recharge['end_time'] > datetime.datetime.strptime(order['end_time'], '%Y-%m-%d %H:%M:%S'):  # 套餐包结束时间大于充电订单结束时间
             if recharge['residue_time'] >= recharge_time:
@@ -644,41 +660,12 @@ def tranche_pay(order,note,rechargetime,user,price_one,first_proportion,second_p
                 cmd = f"update wxapp_recharge_package_order set residue_time=0 where id={recharge['id']}"
                 sob.update_mysql_record(sob_handle, cmd)
     if is_pay == False:  # 套餐时间不足
-        if order['order_status'] == 20:
-            end_time = order['end_time'].strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            end_time = timer.get_now()
-        end_times = end_time[:10]
-        start_time = order['start_time'].strftime("%Y-%m-%d %H:%M:%S")
-        start_times = start_time[:10]
-        if start_times == end_times:
-            table_name = f'wxapp_pod_port_electric_{start_times}'
-            table_name = table_name.replace('-', '_')
-            cmd = f"select portelectric from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}'"
-            pod_port_electric = sob.select_mysql_record(sob_handle, cmd)
-        else:
-            table_name = f'wxapp_pod_port_electric_{start_times}'
-            table_name = table_name.replace('-', '_')
-            cmd = f"select portelectric from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}'"
-            pod_port_electric_start = sob.select_mysql_record(sob_handle, cmd)
-            table_name = f'wxapp_pod_port_electric_{end_times}'
-            table_name = table_name.replace('-', '_')
-            cmd = f"select portelectric from {table_name} where pile_id={order['pile_id']} and portnum={order['portnum']} and add_time>'{start_time}' and add_time<'{end_time}'"
-            pod_port_electric_end = sob.select_mysql_record(sob_handle, cmd)
-            pod_port_electric = pod_port_electric_start + pod_port_electric_end
-        pod_port_electric = sorted(pod_port_electric, key=lambda pod_port_electric: pod_port_electric["portelectric"],
-                                   reverse=True)  # 排序
-        portelectric = pod_port_electric[0]['portelectric']  # 前x分钟最高电流
-        cmd = f"select * from wxapp_bill_tranche where note_id={note['id']} and start_section<={portelectric} and end_section>={portelectric}"
-        bill_tranche = sob.select_mysql_record(sob_handle, cmd)
-        if bill_tranche:
-            bill_tranche = bill_tranche[0]
-        else:
-            cmd = f"select * from wxapp_bill_tranche where note_id={note['id']} order by sort"
-            bill_tranche = sob.select_mysql_record(sob_handle, cmd)
-            bill_tranche = bill_tranche[0]
-        pay_price = bill_tranche['price'] * recharge_time + price_one  # 需要付款金额
-        total_price = bill_tranche['price'] * recharge_time + price_one
+        cmd = f"select * from wxapp_bill where note_id={note['id']} and billtype=4"
+        bills = sob.select_mysql_record(sob_handle, cmd)
+        electrct_price = bills[0]['price'] * math.ceil(consum_elec)
+        server_price = note['server_fee'] * math.ceil(consum_elec)
+        pay_price = electrct_price + price_one + server_price# 需要付款金额
+        total_price = electrct_price + price_one + server_price
 
         first_proportion_money = total_price * (first_proportion / 100)  # 一级（代理商）分成
         second_proportion_money = total_price * (second_proportion / 100)  # 二级（物业）分成
@@ -723,7 +710,7 @@ def tranche_pay(order,note,rechargetime,user,price_one,first_proportion,second_p
             # 订单支付提醒
             order_pay_send_temp(order['mini_id'], note['note_name'], rechargetime, pay_price, user['open_id'],
                                 order['id'])
-    cmd = f"update wxapp_order set recharge_time={recharge_time_total},total_price={total_price},pay_price={pay_price},first_proportion_money={first_proportion_money},second_proportion_money={second_proportion_money} where id={order['id']}"
+    cmd = f"update wxapp_order set recharge_time={recharge_time_total},total_price={total_price},pay_price={pay_price},electrct_price={electrct_price},server_price={server_price},first_proportion_money={first_proportion_money},second_proportion_money={second_proportion_money} where id={order['id']}"
     sob.update_mysql_record(sob_handle, cmd)
     sob.sql_close(sob_handle)
 

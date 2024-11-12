@@ -23,7 +23,7 @@ prolog = MyLogger("main", level=20).logger
 class change_server:
 
     def __init__(self):
-        self.port = ('0.0.0.0', 37881)
+        self.port = ('0.0.0.0', 37882)
         # 客服端集合
         self.tcpclients = set()
         self.timer = wf_time_new()

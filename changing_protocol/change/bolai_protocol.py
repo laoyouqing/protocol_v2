@@ -25,7 +25,6 @@ def bolai_protocol(data, conn, addr):
         index = data.find('fcee')
         data_pile = data[index + 4:]
         data = data[:index + 4]
-    print('--------------')
     # 2. 校验字符串长度都 2byte
     if cklen == len(data):
         # 唯一标记 onlytag 网关ID
@@ -167,6 +166,8 @@ def bolai_protocol(data, conn, addr):
                 power = int(data[60:64], 16)
                 # 电流
                 electric = int(data[64:68], 16)
+                # 用电量
+                consum_elec = int(data[68:72], 16)
                 sob_handle = sob.sql_open(db_config)
                 cmd = f"select * from wxapp_pod_pile where gateway_id='{onlytag}' and serialnum='{plugnum}'"
                 pod_pile = sob.select_mysql_record(sob_handle, cmd)
@@ -182,7 +183,7 @@ def bolai_protocol(data, conn, addr):
                         rechargetime = (timer.time2timestamp(order['end_time']) - timer.time2timestamp(
                             order['start_time'].strftime("%Y-%m-%d %H:%M:%S"))) / 60  # 分钟
                         # 结束充电
-                        over_recharge(order, rechargetime, end_time, plugstatus, power, electric)
+                        over_recharge(order, rechargetime, end_time, plugstatus, power, electric,consum_elec)
                 sob.sql_close(sob_handle)
                 # 回复指令
                 repheard = 'fcff'
@@ -245,6 +246,8 @@ def bolai_protocol(data, conn, addr):
                 power = int(data[60:64], 16)
                 # 电流
                 electric = int(data[64:68], 16)
+                # 用电量
+                consum_elec = int(data[68:72], 16)
                 sob_handle = sob.sql_open(db_config)
                 cmd = f"select * from wxapp_pod_pile where gateway_id='{onlytag}' and serialnum='{plugnum}'"
                 pod_pile = sob.select_mysql_record(sob_handle, cmd)
@@ -260,7 +263,7 @@ def bolai_protocol(data, conn, addr):
                         rechargetime = (timer.time2timestamp(order['end_time']) - timer.time2timestamp(
                             order['start_time'].strftime("%Y-%m-%d %H:%M:%S"))) / 60  # 分钟
                         # 结束充电
-                        over_recharge(order, rechargetime, end_time, plugstatus, power, electric)
+                        over_recharge(order, rechargetime, end_time, plugstatus, power, electric,consum_elec)
                 sob.sql_close(sob_handle)
                 repheard = 'fcff'
                 # 命令 + 流水号(设备主动上报帧流水号为 0) + 回复包类型 00(数据包方向00下发 01上行)
@@ -331,7 +334,6 @@ def bolai_protocol(data, conn, addr):
                             five_order_refund(order)
                 sob.sql_close(sob_handle)
             elif childcmd == '0f':
-                print('----------0f------')
                 plugnum = int(data[42:44], 16)  # 插座号
                 pile = int(data[44:46], 16)  # 插孔号
                 status = data[46:48]  # 状态
@@ -728,6 +730,9 @@ def bolai_protocol(data, conn, addr):
                     # 当前电流
                     key_electric = resp[8]['key']
                     value_electric = int(resp[8]['value'], 16)
+                    # 用电量
+                    key_consum_elec = resp[9]['key']
+                    value_consum_elec = int(resp[9]['value'], 16)
                     sob_handle = sob.sql_open(db_config)
                     cmd = f"select * from wxapp_pod_pile where snum='{value_mac}'"
                     pod_pile = sob.select_mysql_record(sob_handle, cmd)
@@ -743,7 +748,7 @@ def bolai_protocol(data, conn, addr):
                             rechargetime = (timer.time2timestamp(order['end_time']) - timer.time2timestamp(
                                 order['start_time'].strftime("%Y-%m-%d %H:%M:%S"))) / 60  # 分钟
                             # 结束充电
-                            over_recharge(order, rechargetime, end_time, value_status, value_power, value_electric)
+                            over_recharge(order, rechargetime, end_time, value_status, value_power, value_electric,value_consum_elec)
                             cmd = f"update wxapp_order set order_status=20,end_time='{timer.get_now()}' where id={order['id']}"
                             sob.update_mysql_record(sob_handle, cmd)
                     sob.sql_close(sob_handle)
@@ -829,6 +834,9 @@ def bolai_protocol(data, conn, addr):
                     # 当前电流
                     key_electric = resp[8]['key']
                     value_electric = int(resp[8]['value'],16)
+                    # 用电量
+                    key_consum_elec = resp[9]['key']
+                    value_consum_elec = int(resp[9]['value'], 16)
                     sob_handle = sob.sql_open(db_config)
                     cmd = f"select * from wxapp_pod_pile where snum='{value_mac}'"
                     pod_pile = sob.select_mysql_record(sob_handle, cmd)
@@ -844,7 +852,7 @@ def bolai_protocol(data, conn, addr):
                             rechargetime = (timer.time2timestamp(order['end_time']) - timer.time2timestamp(
                                 order['start_time'].strftime("%Y-%m-%d %H:%M:%S"))) / 60  # 分钟
                             # 结束充电
-                            over_recharge(order, rechargetime, end_time, value_status, value_power, value_electric)
+                            over_recharge(order, rechargetime, end_time, value_status, value_power, value_electric,value_consum_elec)
                     sob.sql_close(sob_handle)
                     # 平台回复
                     repheard = 'fcff'

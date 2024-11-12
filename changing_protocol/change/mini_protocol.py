@@ -20,10 +20,6 @@ def mini_protocol(data, conn, addr,clients):
     data = json.loads(data[0])
     counter = 0  # 记录发送到客户端的个数
     for client in clients:
-        print('-----mini------')
-        print('client', client[1],type(client[1]))
-        print(data['ip'],type(data['ip']))
-        print(str(client[1]))
         if str(client[1]) == data['ip']:
             if data['token'] == 'qfevserver':
                 if data['command'] == 'recharge':
@@ -73,6 +69,7 @@ def mini_protocol(data, conn, addr,clients):
                     second_proportion_money = 0
                     total_price = 0
                     pay_price = 0
+                    server_fee = 0
 
                     if not user['note_id']: ##根据用户首次使用场地做用户属性归属
                         cmd = f"update wxapp_user set note_id={bill['note_id']} where id={user['id']}"
@@ -113,8 +110,9 @@ def mini_protocol(data, conn, addr,clients):
                         is_pay = False
                         if bill['billtype'] == 0:
                             recharge_time = bill['duration']  # 小时
+                            server_fee = note['server_fee'] * recharge_time
                             end_time = timer.get_now_bef_aft(hours=-recharge_time)
-                            total_price = price_one + bill['total_price']
+                            total_price = price_one + bill['total_price'] + server_fee
                             for recharge in recharge_package_orders:
                                 if recharge['end_time'] > end_time:  # 套餐包结束时间大于充电订单结束时间
                                     if recharge['residue_time'] >= recharge_time:
@@ -124,13 +122,14 @@ def mini_protocol(data, conn, addr,clients):
                                         is_pay = True  # 套餐扣费
                                         break
                             if is_pay == False:  # 套餐时间不足
-                                pay_price = bill['total_price'] + price_one
+                                pay_price = bill['total_price'] + price_one + server_fee
                                 first_proportion_money = pay_price * (first_proportion / 100)
                                 second_proportion_money = pay_price * (second_proportion / 100)
                         elif bill['billtype'] == 1:
                             recharge_time = int(data['hours'])  # 小时
+                            server_fee = note['server_fee'] * recharge_time
                             end_time = timer.get_now_bef_aft(hours=-recharge_time)
-                            total_price = recharge_time * bill['price'] + price_one
+                            total_price = recharge_time * bill['price'] + price_one + server_fee
                             for recharge in recharge_package_orders:
                                 if recharge['end_time'] > end_time:  # 套餐包结束时间大于充电订单结束时间
                                     if recharge['residue_time'] >= recharge_time:
@@ -140,7 +139,7 @@ def mini_protocol(data, conn, addr,clients):
                                         is_pay = True  # 套餐扣费
                                         break
                             if is_pay == False:  # 套餐时间不足
-                                pay_price = recharge_time * bill['price'] + price_one
+                                pay_price = recharge_time * bill['price'] + price_one + server_fee
                                 first_proportion_money = pay_price * (first_proportion / 100)
                                 second_proportion_money = pay_price * (second_proportion / 100)
                         elif bill['billtype'] == 3:
@@ -182,6 +181,8 @@ def mini_protocol(data, conn, addr,clients):
                         'portnum': data['portnum'],
                         'recharge_time':recharge_time,
                         'pay_price':pay_price,
+                        'electrct_price':pay_price-server_fee-price_one,
+                        'server_price':server_fee,
                         'total_price':total_price,
                         'order_status': 1,
                         'pay_status': 10,

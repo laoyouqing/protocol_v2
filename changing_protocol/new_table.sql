@@ -89,6 +89,7 @@ CREATE TABLE `wxapp_note`  (
   `is_ind_dealer` int(0) NULL DEFAULT 0 COMMENT '是否开启单独分成(0关闭 1开启)',
   `bill_type` int(0) NULL DEFAULT 0 COMMENT '计费类型(0按时 1分档)',
   `predict_price` float(10, 2) NULL DEFAULT 0.00 COMMENT '预扣金额',
+  `server_fee` float(10, 2) NULL DEFAULT 0.00 COMMENT '服务费(每度电/每小时)',
   `first_proportion` float(10, 2) NULL DEFAULT 0.00 COMMENT '一级分成比例(代理商)',
   `second_proportion` float(10, 2) NULL DEFAULT 0.00 COMMENT '二级分成比例(社区)',
   `free_time` int(0) NULL DEFAULT 0 COMMENT '免费停放时长（分钟）',
@@ -112,7 +113,7 @@ CREATE TABLE `wxapp_note_elecdata`  (
   `end_number` float(10, 2) NULL DEFAULT 0 COMMENT '最后读数',
   `number` float(10, 2) NULL DEFAULT 0 COMMENT '上报读数',
   `image` varchar(1000) NULL DEFAULT NULL COMMENT '图片',
-  `date_time` datetime(0) NULL DEFAULT NULL COMMENT '时间',
+  `date_time` date(0) NULL DEFAULT NULL COMMENT '时间',
   `add_time` datetime(0) NULL DEFAULT NULL COMMENT '创建时间',
   `update_time` datetime(0) NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`)
@@ -128,7 +129,7 @@ CREATE TABLE `wxapp_bill`  (
   `total_price` float(10, 2)  NULL DEFAULT 0.00 COMMENT '总金额',
   `price` float(10, 2) NULL DEFAULT 0.00 COMMENT '单价',
   `title` varchar(50) NULL DEFAULT NULL COMMENT '标题描述(0.5元/2小时)',
-  `billtype` int(0) NULL DEFAULT 0 COMMENT '计费方式(0默认,1按小时计费,2按时充满自停，3分档计费,4分档充满自停)',
+  `billtype` int(0) NULL DEFAULT 0 COMMENT '计费方式(0默认,1按小时计费,2按时充满自停，3按电量计费,4电量充满自停)',
   `is_ceil` int(0) NULL DEFAULT 0 COMMENT '充满自停计费模式(0默认按分钟,1按小时(向上取整))',
   `step` int(0) NOT NULL DEFAULT 1 COMMENT '步长/小时',
   `duration` int(0) NOT NULL DEFAULT 1 COMMENT '时长',
@@ -148,6 +149,7 @@ CREATE TABLE `wxapp_bill_tranche`  (
   `start_section` int(0) NULL DEFAULT 0 COMMENT '开始区间（分档）',
   `end_section` int(0) NULL DEFAULT 0 COMMENT '结束区间（分档）',
   `sort` int(0) NULL DEFAULT 0 COMMENT '排序',
+  `remarks` varchar(255) NULL DEFAULT NULL COMMENT '备注',
   `add_time` datetime(0) NULL DEFAULT NULL COMMENT '创建时间',
   `update_time` datetime(0) NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`)
@@ -162,7 +164,7 @@ CREATE TABLE `wxapp_pod_pile`  (
   `mini_id` int(0) NULL DEFAULT NULL COMMENT '小程序id',
   `note_id` int(0) NULL DEFAULT NULL COMMENT '社区id',
   `gateway_id` varchar(255) NULL DEFAULT NULL COMMENT '网关id',
-  `type` int(0) NULL DEFAULT NULL COMMENT '充电桩类型  1：新网 2：柏莱(二孔) 3：柏莱(十二孔) 4:柏莱(子母机) 5网关',
+  `type` int(0) NULL DEFAULT NULL COMMENT '充电桩类型  1：新网 2：柏莱(二孔) 3：柏莱(十二孔) 4:柏莱(子母机) 5网关 6:柏莱（十口）',
   `title` varchar(255) NULL DEFAULT NULL COMMENT '标题',
   `snum` varchar(50) NULL DEFAULT NULL COMMENT '设备SN编码',
   `serialnum` varchar(50) NULL DEFAULT NULL COMMENT '充电桩串号',
@@ -232,6 +234,8 @@ CREATE TABLE `wxapp_order`  (
   `recharge_time` double(10, 2) NULL DEFAULT 0.00 COMMENT '充电时长',
   `total_price` double(10, 2)  NULL DEFAULT 0.00 COMMENT '原支付金额',
   `pay_price` double(10, 2)  NULL DEFAULT 0.00 COMMENT '实际付款金额',
+  `electrct_price` double(10, 2)  NULL DEFAULT 0.00 COMMENT '基础电费',
+  `server_price` double(10, 2)  NULL DEFAULT 0.00 COMMENT '服务费',
   `pay_type` tinyint(3) NULL DEFAULT 20 COMMENT '支付方式(10余额支付 20微信支付 30套餐扣款 40刷卡充电 50白名单用户 60虚拟金额支付)',
   `billtype` tinyint(3) NULL DEFAULT 0 COMMENT '计费方式(0默认,1按小时计费,2充满自停 3分档计费,4分档充满自停)',
   `order_status` tinyint(3)  NULL DEFAULT 10 COMMENT '订单状态(0未开始充电 1启动中 10充电中 11结束中 20充电结束 30充电失败)',
@@ -253,6 +257,7 @@ CREATE TABLE `wxapp_order`  (
   `porttag` int(5) NULL DEFAULT 0 COMMENT '端口标记',
   `endelectric` int(5) NULL DEFAULT 0 COMMENT '结束时电流值',
   `portpulse` varchar(20) NULL DEFAULT '' COMMENT '脉冲值',
+  `rechance_elce` double(10, 2) NULL DEFAULT 0.00 COMMENT '电量',
   `onlytag` varchar(20) NULL DEFAULT '' COMMENT '唯一标识/网关id/mac',
   `add_time` datetime(0) NULL DEFAULT NULL COMMENT '创建时间',
   `update_time` datetime(0) NULL DEFAULT NULL COMMENT '更新时间',
@@ -302,6 +307,7 @@ CREATE TABLE `wxapp_recharge_plan`  (
 DROP TABLE IF EXISTS `wxapp_recharge_order`;
 CREATE TABLE `wxapp_recharge_order`  (
   `id` int(0) NOT NULL AUTO_INCREMENT,
+  `order_id` varchar(50) NULL DEFAULT NULL COMMENT '订单id',
   `mini_id` int(0) NULL DEFAULT NULL COMMENT '小程序id',
   `user_id` int(0) NULL DEFAULT NULL COMMENT '用户id',
   `plan_id` int(0) NULL DEFAULT NULL COMMENT '充值套餐id',
@@ -311,7 +317,7 @@ CREATE TABLE `wxapp_recharge_order`  (
   `actual_money` double(10, 2) NOT NULL DEFAULT 0.00 COMMENT '实际到账金额',
   `refund_money` double(10, 2) NOT NULL DEFAULT 0.00 COMMENT '退款金额',
   `pay_status` tinyint(3) NOT NULL DEFAULT 10 COMMENT '支付状态(10待支付 20已支付)',
-  `is_refund` tinyint(3) NOT NULL DEFAULT 10 COMMENT '退款状态(0未退款 1已退款)',
+  `is_refund` tinyint(3) NOT NULL DEFAULT 0 COMMENT '退款状态(0未退款 1已退款)',
   `pay_type` tinyint(3) NOT NULL DEFAULT 10 COMMENT '支付状态(10微信 20虚拟)',
   `is_represent` tinyint(3) NOT NULL DEFAULT 0 COMMENT '是否代他充值(0否 1是)',
   `rechargeuser_id` varchar(50) NOT NULL DEFAULT '0' COMMENT '被充值用户id',
@@ -329,7 +335,6 @@ CREATE TABLE `wxapp_recharge_order`  (
 DROP TABLE IF EXISTS `wxapp_recharge_package`;
 CREATE TABLE `wxapp_recharge_package`  (
   `id` int(0) NOT NULL AUTO_INCREMENT,
-  `order_id` varchar(50) NULL DEFAULT NULL COMMENT '订单id',
   `mini_id` int(0) NULL DEFAULT NULL COMMENT '小程序id',
   `note_id` int(0) NULL DEFAULT NULL COMMENT 'note_id',
   `type` tinyint(3) NULL DEFAULT 0 COMMENT '套餐类型 (1:停车包 2:停车加充电包)',
@@ -360,8 +365,8 @@ CREATE TABLE `wxapp_recharge_package_order`  (
   `pay_price` double(10, 2) NULL DEFAULT 0.00 COMMENT '用户支付金额',
   `pay_status` tinyint(3) NULL DEFAULT 10 COMMENT '支付状态(10待支付 20已支付)',
   `order_status` tinyint(3) NULL DEFAULT 10 COMMENT '订单状态(10未完成 20已完成 30退款中 40已退款 50退款被拒绝 60退款异常)',
-  `pay_time` double NULL DEFAULT NULL COMMENT '付款时间',
-  `refund_time` double NULL DEFAULT NULL COMMENT '退款时间',
+  `pay_time` datetime(0) NULL DEFAULT NULL COMMENT '付款时间',
+  `refund_time` datetime(0) NULL DEFAULT NULL COMMENT '退款时间',
   `transaction_id` varchar(30)  NULL DEFAULT '' COMMENT '微信支付交易号',
   `type` tinyint(3)  NULL DEFAULT 0 COMMENT '套餐类型 (1:停车包 2:停车加充电包)',
   `plan_name` varchar(255)  NULL DEFAULT '' COMMENT '套餐名称',
@@ -391,14 +396,15 @@ CREATE TABLE `wxapp_recharge_package_order_renew`  (
   `note_id` int(0) NULL DEFAULT NULL COMMENT 'note_id',
   `user_id` int(0) NULL DEFAULT NULL COMMENT 'user_id',
   `packageorder_id` int(0) NULL DEFAULT NULL COMMENT '订单id',
+  `recharge_time` int(11)  NULL DEFAULT 0 COMMENT '充电时间',
   `start_time` datetime(0) NULL DEFAULT NULL COMMENT '开始时间',
   `end_time` datetime(0) NULL DEFAULT NULL COMMENT '到期时间',
   `pay_type` tinyint(3)  NULL DEFAULT 20 COMMENT '支付方式(10余额支付 20微信支付 30混合支付 40管理员代买)',
   `pay_price` double(10, 2) NULL DEFAULT 0.00 COMMENT '用户支付金额',
   `pay_status` tinyint(3) NULL DEFAULT 10 COMMENT '支付状态(10待支付 20已支付)',
   `order_status` tinyint(3) NULL DEFAULT 10 COMMENT '订单状态(10未完成 20已完成 30退款中 40已退款 50退款被拒绝 60退款异常)',
-  `pay_time` double NULL DEFAULT NULL COMMENT '付款时间',
-  `refund_time` double NULL DEFAULT NULL COMMENT '退款时间',
+  `pay_time` datetime(0) NULL DEFAULT NULL COMMENT '付款时间',
+  `refund_time` datetime(0) NULL DEFAULT NULL COMMENT '退款时间',
   `transaction_id` varchar(30)  NULL DEFAULT '' COMMENT '微信支付交易号',
   `is_charge_buy` tinyint(3)  NULL DEFAULT 0 COMMENT '是否购买无忧充电(0否 1是)',
   `is_invalid` tinyint(3)  NULL DEFAULT 0 COMMENT '订单是否失效(0未失效 1已失效)',
@@ -450,10 +456,6 @@ CREATE TABLE `wxapp_problem_feedback`  (
   `add_time` datetime(0) NULL DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`)
 ) ENGINE = InnoDB COMMENT = '问题反馈表';
-
-
-
-
 
 DROP TABLE IF EXISTS `wxapp_dealer_order`;
 CREATE TABLE `wxapp_dealer_order`  (
@@ -629,7 +631,7 @@ DROP TABLE IF EXISTS `wxapp_payinfo`;
 CREATE TABLE `wxapp_payinfo`  (
   `id` int(0) NOT NULL AUTO_INCREMENT,
   `mini_id` int(0) NULL DEFAULT NULL COMMENT '小程序id',
-  `orgid` varchar(255)  NOT NULL DEFAULT '' COMMENT '共享集团号/代理商参数时必填',
+  `orgid` varchar(255)  NOT NULL DEFAULT '' COMMENT '共享集团号/代理商参数时必填/v3key',
   `pay_type` int(11) NOT NULL DEFAULT 0 COMMENT '1.普通支付 2.通联支付',
   `mchid` varchar(255)  NOT NULL DEFAULT '' COMMENT 'mchid',
   `apikey` mediumtext  NOT NULL DEFAULT '' COMMENT 'serial_number (tl app_id)',

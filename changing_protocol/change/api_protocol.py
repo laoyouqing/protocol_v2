@@ -507,21 +507,36 @@ def api_protocol(data, conn, addr,clients):
                     pod_pile = sob.select_mysql_record(sob_handle, cmd)
                     pod_pile = pod_pile[0]
                     if pod_pile['type'] == 2 or pod_pile['type'] == 4:
-                        framenumber = secrets.token_hex(4)  # 帧流水号
+                        # 平台下发
+                        framenumber = secrets.token_hex(8)  # 帧流水号
                         repheard = 'fcff'
-                        repcmd = '03'
-                        redata = '0005' + framenumber + '00' + pod_pile['gateway_id'].zfill(14) + 'B'.zfill(
-                            4) + repcmd + dec2hex(
-                            int(pod_pile['serialnum'])).zfill(2) + '00' + dec2hex(full_charge_delay).zfill(4) + dec2hex(
-                            null_charge_delay).zfill(4) + \
-                                 dec2hex(int(full_charge_power * 10)).zfill(4) + dec2hex(
-                            int(null_charge_power * 10)).zfill(4) + dec2hex(high_temperature).zfill(2)
-                        replen = (len(redata) + 6) / 2
-                        replen = dec2hex(replen).zfill(4)  # 包长
-                        cksum = dec2hex(uchar_checksum(binascii.a2b_hex(replen + redata))).zfill(2).lower()  # 校验和
+                        redatalist = [
+                            {'key': '0x1', 'value': '1011'},
+                            {'key': '0x2', 'value': framenumber},
+                            {'key': '0x3', 'value': dec2hex(pod_pile['gateway_id']).zfill(14)},
+                            {'key': '0x4a', 'value': dec2hex(pod_pile['serialnum']).zfill(2)},
+                            {'key': '0x23', 'value': dec2hex(full_charge_power * 10).zfill(4)},
+                            {'key': '0x60', 'value': dec2hex(trickle_threshold).zfill(2)},
+                            {'key': '0x21', 'value': dec2hex(full_charge_delay).zfill(4)},
+                            {'key': '0x24', 'value': dec2hex(null_charge_power * 10).zfill(4)},
+                            {'key': '0x22', 'value': dec2hex(null_charge_delay).zfill(4)},
+                            {'key': '0x59', 'value': dec2hex(max_recharge_time).zfill(4)},
+                            {'key': '0x25', 'value': dec2hex(high_temperature).zfill(2)},
+                            {'key': '0x11', 'value': dec2hex(threshold_p * 10).zfill(4)},
+                            {'key': '0x10', 'value': dec2hex(threshold_i).zfill(4)},
 
+                        ]
+                        redata = ''  # bkv pack数据和
+                        for data in redatalist:
+                            resp = pack(data)
+                            redata += resp
+                        # 包长
+                        replen = (len(redata) + 6) / 2
+                        replen = dec2hex(replen).zfill(4)
+                        # 校验和
+                        cksum = dec2hex(uchar_checksum(binascii.a2b_hex(replen + redata))).zfill(2).lower()
                         repmsg = repheard + replen + redata + cksum + 'fcee'
-                        prolog.info('插座系统参数设置 resp data:{}'.format(repmsg))
+                        prolog.info('系统参数设置 resp data:{}'.format(repmsg))
                         repsend = binascii.a2b_hex(repmsg)
                         client[0].send(repsend)
                     elif pod_pile['type'] == 3:
@@ -566,14 +581,11 @@ def api_protocol(data, conn, addr,clients):
                         'full_charge_power':full_charge_power,
                         'full_charge_delay':full_charge_delay,
                         'high_temperature':high_temperature,
+                        'max_recharge_time': max_recharge_time,
+                        'trickle_threshold': trickle_threshold,
+                        'threshold_p': threshold_p,
+                        'threshold_i': threshold_i,
                     }
-                    if pod_pile['type'] ==3:
-                        value_info.update({
-                            'max_recharge_time':max_recharge_time,
-                            'trickle_threshold':trickle_threshold,
-                            'threshold_p':threshold_p,
-                            'threshold_i':threshold_i,
-                        })
                     hope_value = list(value_info.keys())
                     if pod_default_param:
                         value_info.update({'id':pod_default_param[0]['id']})
